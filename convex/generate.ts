@@ -1,4 +1,6 @@
 import { action, internalQuery } from "./_generated/server";
+import type { ActionCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { requireClientOwnership } from "./lib/access";
@@ -7,11 +9,19 @@ import { ideogramProvider } from "./ai/ideogram";
 import { writeCaptions } from "./ai/caption";
 import { FORMAT_SIZE, type ImageProvider, type ImageQuality } from "./ai/types";
 
+type GenContext = {
+  clientName: string;
+  palette: string[];
+  styleNotes: string;
+  designRules: string[];
+  captionRules: string[];
+};
+
 // Ownership-checked context for a generation. Actions have no DB access, so the
 // action calls this query first — isolation still goes through the guard.
 export const getContext = internalQuery({
   args: { clientId: v.id("clients") },
-  handler: async (ctx, { clientId }) => {
+  handler: async (ctx, { clientId }): Promise<GenContext> => {
     const { client } = await requireClientOwnership(ctx, clientId);
     const profile = await ctx.db
       .query("brandProfiles")
@@ -35,28 +45,23 @@ function getProvider(name: string): ImageProvider {
   return name === "ideogram" ? ideogramProvider : openaiProvider;
 }
 
-// Builds the image prompt. Brand-locked and explicitly anti-hallucination —
-// this is client-facing work.
-function buildImagePrompt(
-  c: { clientName: string; palette: string[]; styleNotes: string; designRules: string[] },
-  headline: string | undefined,
-  format: string,
-): string {
-  const parts = [
+// Brand-locked, explicitly anti-hallucination — this is client-facing work.
+function buildImagePrompt(c: GenContext, headline: string | undefined, format: string): string {
+  return [
     `Professional, on-brand social media post graphic for "${c.clientName}".`,
     headline ? `Subject / message: ${headline}.` : "",
     c.palette.length ? `Use this brand colour palette: ${c.palette.join(", ")}.` : "",
     c.styleNotes ? `Brand visual style: ${c.styleNotes}.` : "",
     c.designRules.length ? `Design rules (follow all): ${c.designRules.join("; ")}.` : "",
-    `Clean, polished, ${format} composition. Leave tasteful space for an editable headline and logo to be added on top.`,
+    `Clean, polished, ${format} composition. Leave tasteful space for an editable headline and logo on top.`,
     `Do not invent logos, prices, or text claims. Keep any rendered text minimal and correctly spelled.`,
-  ];
-  return parts.filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
-// A lightweight, $0 placeholder image (SVG) used when MOCK_AI=true so the whole
-// UI loop can be exercised without spending on real generation.
-function mockSvg(c: { clientName: string; palette: string[] }, headline: string, size: string): string {
+// $0 placeholder image (SVG) for MOCK_AI=true.
+function mockSvg(c: GenContext, headline: string, size: string): string {
   const [w, h] = size.split("x").map(Number);
   const base = c.palette.find((x) => /^#[0-9a-f]{6}$/i.test(x)) ?? "#FF7A33";
   const accent = c.palette[1] ?? "#1a1611";
@@ -71,120 +76,157 @@ function mockSvg(c: { clientName: string; palette: string[] }, headline: string,
 </svg>`;
 }
 
+// Shared core: generate N images (+ optional captions) and persist as drafts
+// under one batchId. Used by both single and bulk generation.
+async function generateBatch(
+  ctx: ActionCtx,
+  c: GenContext,
+  p: {
+    clientId: Id<"clients">;
+    format: string;
+    headline?: string;
+    productUrl?: string;
+    captionOn: boolean;
+    draft: boolean;
+    imageCount: number;
+    batchId: string;
+  },
+): Promise<void> {
+  const n = Math.min(Math.max(p.imageCount, 1), 4);
+  const size = FORMAT_SIZE[p.format] ?? FORMAT_SIZE.square;
+  const quality: ImageQuality = p.draft ? "low" : "medium";
+  const mock = process.env.MOCK_AI === "true";
+  const imagePrompt = buildImagePrompt(c, p.headline, p.format);
+
+  // ---- Captions ----
+  let captions: string[] = [];
+  if (p.captionOn) {
+    if (mock) {
+      captions = Array.from(
+        { length: n },
+        (_, i) => `${p.headline || c.clientName} — on-brand caption option ${i + 1}. (mock)`,
+      );
+    } else {
+      const key = process.env.ANTHROPIC_API_KEY;
+      if (!key) throw new Error("ANTHROPIC_API_KEY not set in Convex env");
+      const model =
+        (p.draft ? process.env.DRAFT_CAPTION_MODEL : process.env.FINAL_CAPTION_MODEL) ??
+        "claude-sonnet-4-6";
+      captions = await writeCaptions(
+        {
+          clientName: c.clientName,
+          styleNotes: c.styleNotes,
+          captionRules: c.captionRules,
+          headline: p.headline,
+          productUrl: p.productUrl,
+        },
+        key,
+        model,
+        n,
+      );
+    }
+  }
+
+  // ---- Images ----
+  let images: { storageId: Id<"_storage">; cost: number; provider: string; model: string }[] = [];
+  if (mock) {
+    images = await Promise.all(
+      Array.from({ length: n }, async () => {
+        const svg = mockSvg(c, p.headline || "", size);
+        const id = await ctx.storage.store(new Blob([svg], { type: "image/svg+xml" }));
+        return { storageId: id, cost: 0, provider: "mock", model: "mock" };
+      }),
+    );
+  } else {
+    const provider = getProvider(process.env.IMAGE_PROVIDER ?? "openai");
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error("OPENAI_API_KEY not set in Convex env");
+    const model =
+      (p.draft ? process.env.DRAFT_IMAGE_MODEL : process.env.FINAL_IMAGE_MODEL) ?? "gpt-image-1.5";
+    const results = await provider.generate({ prompt: imagePrompt, size, quality, n }, apiKey, model);
+    const perImageCost = provider.estimateCost(quality, size, 1);
+    images = await Promise.all(
+      results.map(async (img) => {
+        const bytes = Uint8Array.from(atob(img.b64), (ch) => ch.charCodeAt(0));
+        const id = await ctx.storage.store(new Blob([bytes], { type: "image/png" }));
+        return { storageId: id, cost: perImageCost, provider: provider.name, model };
+      }),
+    );
+  }
+
+  // ---- Persist each alternative (image[i] paired with caption[i]) ----
+  await Promise.all(
+    images.map((img, i) =>
+      ctx.runMutation(internal.designs.insertDraft, {
+        clientId: p.clientId,
+        storageId: img.storageId,
+        caption: p.captionOn ? captions[i] ?? captions[0] : undefined,
+        format: p.format,
+        prompt: imagePrompt,
+        provider: img.provider,
+        model: img.model,
+        costEstimate: img.cost,
+        batchId: p.batchId,
+      }),
+    ),
+  );
+}
+
+// Single post: a few alternatives from one input.
 export const run = action({
   args: {
     clientId: v.id("clients"),
-    format: v.string(), // "square" | "story" | "land"
+    format: v.string(),
     headline: v.optional(v.string()),
     productUrl: v.optional(v.string()),
     captionOn: v.boolean(),
     imageCount: v.optional(v.number()),
-    draft: v.optional(v.boolean()), // cheap tiers for drafts/tests
+    draft: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const c = await ctx.runQuery(internal.generate.getContext, {
-      clientId: args.clientId,
-    });
-    const n = Math.min(Math.max(args.imageCount ?? 3, 1), 4);
-    const size = FORMAT_SIZE[args.format] ?? FORMAT_SIZE.square;
-    const quality: ImageQuality = args.draft ? "low" : "medium";
+    const c = await ctx.runQuery(internal.generate.getContext, { clientId: args.clientId });
     const batchId = crypto.randomUUID();
-    const mock = process.env.MOCK_AI === "true";
+    await generateBatch(ctx, c, {
+      clientId: args.clientId,
+      format: args.format,
+      headline: args.headline,
+      productUrl: args.productUrl,
+      captionOn: args.captionOn,
+      draft: args.draft ?? true,
+      imageCount: args.imageCount ?? 3,
+      batchId,
+    });
+    return { batchId, count: Math.min(Math.max(args.imageCount ?? 3, 1), 4), mock: process.env.MOCK_AI === "true" };
+  },
+});
 
-    const imagePrompt = buildImagePrompt(c, args.headline, args.format);
-
-    // ---- Captions ----
-    let captions: string[] = [];
-    if (args.captionOn) {
-      if (mock) {
-        captions = Array.from(
-          { length: n },
-          (_, i) =>
-            `${args.headline || c.clientName} — on-brand caption option ${i + 1}. (mock)`,
-        );
-      } else {
-        const key = process.env.ANTHROPIC_API_KEY;
-        if (!key) throw new Error("ANTHROPIC_API_KEY not set in Convex env");
-        const model =
-          (args.draft
-            ? process.env.DRAFT_CAPTION_MODEL
-            : process.env.FINAL_CAPTION_MODEL) ?? "claude-sonnet-4-6";
-        captions = await writeCaptions(
-          {
-            clientName: c.clientName,
-            styleNotes: c.styleNotes,
-            captionRules: c.captionRules,
-            headline: args.headline,
-            productUrl: args.productUrl,
-          },
-          key,
-          model,
-          n,
-        );
-      }
+// Bulk: one headline/URL per line → one post each, all under one batch.
+export const bulkRun = action({
+  args: {
+    clientId: v.id("clients"),
+    format: v.string(),
+    lines: v.array(v.string()),
+    captionOn: v.boolean(),
+    draft: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const lines = args.lines.map((l) => l.trim()).filter(Boolean).slice(0, 25);
+    if (!lines.length) throw new Error("Add at least one line.");
+    const c = await ctx.runQuery(internal.generate.getContext, { clientId: args.clientId });
+    const batchId = crypto.randomUUID();
+    for (const line of lines) {
+      const isUrl = /^https?:\/\//i.test(line);
+      await generateBatch(ctx, c, {
+        clientId: args.clientId,
+        format: args.format,
+        headline: isUrl ? undefined : line,
+        productUrl: isUrl ? line : undefined,
+        captionOn: args.captionOn,
+        draft: args.draft ?? true,
+        imageCount: 1,
+        batchId,
+      });
     }
-
-    // ---- Images ----
-    let images: { storageId: string; cost: number; provider: string; model: string }[] = [];
-    if (mock) {
-      const stored = await Promise.all(
-        Array.from({ length: n }, async () => {
-          const svg = mockSvg(c, args.headline || "", size);
-          const id = await ctx.storage.store(
-            new Blob([svg], { type: "image/svg+xml" }),
-          );
-          return { storageId: id as string, cost: 0, provider: "mock", model: "mock" };
-        }),
-      );
-      images = stored;
-    } else {
-      const providerName = process.env.IMAGE_PROVIDER ?? "openai";
-      const provider = getProvider(providerName);
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (!apiKey) throw new Error("OPENAI_API_KEY not set in Convex env");
-      const model =
-        (args.draft
-          ? process.env.DRAFT_IMAGE_MODEL
-          : process.env.FINAL_IMAGE_MODEL) ?? "gpt-image-1.5";
-      const results = await provider.generate(
-        { prompt: imagePrompt, size, quality, n },
-        apiKey,
-        model,
-      );
-      const perImageCost = provider.estimateCost(quality, size, 1);
-      images = await Promise.all(
-        results.map(async (img) => {
-          const bytes = Uint8Array.from(atob(img.b64), (ch) => ch.charCodeAt(0));
-          const id = await ctx.storage.store(
-            new Blob([bytes], { type: "image/png" }),
-          );
-          return {
-            storageId: id as string,
-            cost: perImageCost,
-            provider: provider.name,
-            model,
-          };
-        }),
-      );
-    }
-
-    // ---- Persist each alternative as a draft (pairs image[i] with caption[i]) ----
-    await Promise.all(
-      images.map((img, i) =>
-        ctx.runMutation(internal.designs.insertDraft, {
-          clientId: args.clientId,
-          storageId: img.storageId as any,
-          caption: args.captionOn ? captions[i] ?? captions[0] : undefined,
-          format: args.format,
-          prompt: imagePrompt,
-          provider: img.provider,
-          model: img.model,
-          costEstimate: img.cost,
-          batchId,
-        }),
-      ),
-    );
-
-    return { batchId, count: images.length, mock };
+    return { batchId, count: lines.length, mock: process.env.MOCK_AI === "true" };
   },
 });

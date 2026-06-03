@@ -15,6 +15,14 @@ export default defineSchema({
     ownerId: v.id("users"),
   }).index("by_owner", ["ownerId"]),
 
+  // Emails an admin has approved for account creation. The auth gate
+  // (convex/auth.ts) refuses to create accounts for any email not listed here
+  // (admins and the bootstrap first user excepted).
+  allowedEmails: defineTable({
+    email: v.string(),
+    addedBy: v.optional(v.id("users")),
+  }).index("by_email", ["email"]),
+
   // One per client. Learned visual identity.
   brandProfiles: defineTable({
     clientId: v.id("clients"),

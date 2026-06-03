@@ -60,14 +60,20 @@ Convex backend is live on a **preview** deployment (`ardent-lapwing-470`), all e
   `NEXT_PUBLIC_CONVEX_URL`. `next build` passes; server serves `/login` + `/app`.
 - GitHub push working (write-scoped PAT). Both AI keys stored.
 
+## Also built (admin + bulk)
+- **Invite-only auth:** public sign-up disabled (login is sign-in only). The
+  `createOrUpdateUser` gate refuses any account whose email isn't admin/approved.
+- **Admin panel** (sidebar ⚙, admins only): list team members + create a user
+  (email + temp password, via `createAccount`). Admin = ADMIN_EMAILS or first user.
+- **Bulk tab:** one headline/URL per line (≤25) → a post each, on the client's brand.
+
 ## Remaining
-1. **Browser click-through** — sign up, create a client, add gallery/rules, generate
-   3 mock options ($0), approve one → confirm it lands in the gallery. I can drive this
-   with browser tooling if you want, or you can run `npm run dev` and try it.
-2. **Production deployment** — current backend is a *preview* (ephemeral). For real use,
-   create a prod deployment + prod deploy key, then re-run the env setup against prod.
-3. **Turn off `MOCK_AI`** (set to `false` on the deployment) when you want real images —
-   start with `draft: true` (cheap tier) to keep spend tiny.
+1. **⚠️ Production deploy key needed.** The *preview* deploy key creates throwaway
+   deployments (each deploy spun a new URL and lost env vars). For a stable backend we
+   need a **Production deploy key** (Convex dashboard → project zz-test → Settings →
+   Deploy Keys → Production). Then I deploy to prod, set env once, and it persists.
+2. **Browser click-through** of the full loop ($0 on mock) — I can drive it or you can.
+3. **Turn off `MOCK_AI`** (→ `false`) when you want real images; start with draft tier.
 
 ## Manual steps you own (later)
 - **Vercel:** connect `zztest-` repo, set `NEXT_PUBLIC_CONVEX_URL` env var, deploy preview.

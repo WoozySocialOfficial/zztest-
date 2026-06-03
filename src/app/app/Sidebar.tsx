@@ -11,10 +11,16 @@ type ClientRow = { _id: Id<"clients">; name: string };
 export function Sidebar({
   clients,
   selectedId,
+  isAdmin,
+  adminActive,
+  onOpenAdmin,
   onSelect,
 }: {
   clients: ClientRow[];
   selectedId: Id<"clients"> | null;
+  isAdmin: boolean;
+  adminActive: boolean;
+  onOpenAdmin: () => void;
   onSelect: (id: Id<"clients">) => void;
 }) {
   const create = useMutation(api.clients.create);
@@ -136,13 +142,27 @@ export function Sidebar({
         )}
       </div>
 
-      <button
-        className="text-[12px] text-[var(--muted)] hover:text-[var(--ink)] text-left pt-3"
-        style={{ borderTop: "1px solid var(--line)" }}
-        onClick={() => signOut()}
-      >
-        Sign out
-      </button>
+      <div className="flex flex-col gap-1.5 pt-3" style={{ borderTop: "1px solid var(--line)" }}>
+        {isAdmin && (
+          <button
+            className="flex items-center gap-2 p-2.5 rounded-xl text-[13px] font-semibold text-left transition"
+            style={{
+              background: adminActive ? "var(--panel-2)" : "transparent",
+              border: adminActive ? "1px solid var(--line)" : "1px solid transparent",
+              color: "var(--ink)",
+            }}
+            onClick={onOpenAdmin}
+          >
+            <span style={{ fontSize: 15 }}>⚙</span> Admin
+          </button>
+        )}
+        <button
+          className="text-[12px] text-[var(--muted)] hover:text-[var(--ink)] text-left px-2.5"
+          onClick={() => signOut()}
+        >
+          Sign out
+        </button>
+      </div>
     </aside>
   );
 }

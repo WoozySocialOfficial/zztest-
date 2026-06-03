@@ -7,7 +7,6 @@ import { FormEvent, useState } from "react";
 export default function LoginPage() {
   const { signIn } = useAuthActions();
   const router = useRouter();
-  const [flow, setFlow] = useState<"signIn" | "signUp">("signIn");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -18,14 +17,10 @@ export default function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      await signIn("password", { email, password, flow });
+      await signIn("password", { email, password, flow: "signIn" });
       router.push("/app");
     } catch {
-      setError(
-        flow === "signIn"
-          ? "Invalid email or password."
-          : "Could not create that account. Use a valid email and a stronger password.",
-      );
+      setError("Invalid email or password.");
     } finally {
       setBusy(false);
     }
@@ -56,14 +51,8 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={submit} className="card">
-          <h1 className="text-[20px] mb-1">
-            {flow === "signIn" ? "Welcome back" : "Create your account"}
-          </h1>
-          <p className="hint mb-2">
-            {flow === "signIn"
-              ? "Sign in to your studio."
-              : "Set up access to the studio."}
-          </p>
+          <h1 className="text-[20px] mb-1">Welcome back</h1>
+          <p className="hint mb-2">Sign in to your studio.</p>
 
           <label className="label">Email</label>
           <input
@@ -79,7 +68,7 @@ export default function LoginPage() {
           <input
             className="input"
             type="password"
-            autoComplete={flow === "signIn" ? "current-password" : "new-password"}
+            autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
@@ -92,21 +81,13 @@ export default function LoginPage() {
           )}
 
           <button className="btn w-full mt-5" type="submit" disabled={busy}>
-            {busy ? "Please wait…" : flow === "signIn" ? "Sign in" : "Create account"}
+            {busy ? "Signing in…" : "Sign in"}
           </button>
 
-          <button
-            type="button"
-            className="w-full mt-3 text-[12.5px] text-[var(--muted)] hover:text-[var(--ink)]"
-            onClick={() => {
-              setFlow(flow === "signIn" ? "signUp" : "signIn");
-              setError(null);
-            }}
-          >
-            {flow === "signIn"
-              ? "Need an account? Create one"
-              : "Already have an account? Sign in"}
-          </button>
+          <p className="hint mt-4 text-center">
+            Accounts are created by an admin. Need access? Ask your studio admin
+            to add you.
+          </p>
         </form>
       </div>
     </main>

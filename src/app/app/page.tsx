@@ -13,6 +13,8 @@ import { useEffect, useState } from "react";
 import { Sidebar } from "./Sidebar";
 import { StudioTab } from "./StudioTab";
 import { BrandTab } from "./BrandTab";
+import { BulkTab } from "./BulkTab";
+import { AdminTab } from "./AdminTab";
 
 export default function AppPage() {
   return (
@@ -40,12 +42,14 @@ function RedirectToLogin() {
   return null;
 }
 
-type Tab = "studio" | "brand";
+type Tab = "studio" | "brand" | "bulk";
 
 function Workspace() {
   const clients = useQuery(api.clients.list);
+  const isAdmin = useQuery(api.admin.isAdmin) ?? false;
   const [selected, setSelected] = useState<Id<"clients"> | null>(null);
   const [tab, setTab] = useState<Tab>("studio");
+  const [adminView, setAdminView] = useState(false);
 
   useEffect(() => {
     if (clients && clients.length && !selected) setSelected(clients[0]._id);
@@ -60,15 +64,21 @@ function Workspace() {
     >
       <Sidebar
         clients={clients ?? []}
-        selectedId={selected}
+        selectedId={adminView ? null : selected}
+        isAdmin={isAdmin}
+        adminActive={adminView}
+        onOpenAdmin={() => setAdminView(true)}
         onSelect={(id) => {
+          setAdminView(false);
           setSelected(id);
           setTab("studio");
         }}
       />
 
       <main className="px-7 py-6 w-full" style={{ maxWidth: 1200 }}>
-        {current ? (
+        {adminView ? (
+          <AdminTab />
+        ) : current ? (
           <>
             <header className="flex items-start justify-between gap-4 flex-wrap mb-6">
               <div>
@@ -79,10 +89,7 @@ function Workspace() {
               </div>
               <div
                 className="flex gap-1 p-1 rounded-xl"
-                style={{
-                  background: "var(--panel)",
-                  border: "1px solid var(--line)",
-                }}
+                style={{ background: "var(--panel)", border: "1px solid var(--line)" }}
               >
                 <TabButton active={tab === "studio"} onClick={() => setTab("studio")}>
                   Design Studio
@@ -90,13 +97,18 @@ function Workspace() {
                 <TabButton active={tab === "brand"} onClick={() => setTab("brand")}>
                   Brand Gallery
                 </TabButton>
+                <TabButton active={tab === "bulk"} onClick={() => setTab("bulk")}>
+                  Bulk
+                </TabButton>
               </div>
             </header>
 
-            {tab === "studio" ? (
+            {tab === "studio" && (
               <StudioTab clientId={current._id} clientName={current.name} />
-            ) : (
-              <BrandTab clientId={current._id} />
+            )}
+            {tab === "brand" && <BrandTab clientId={current._id} />}
+            {tab === "bulk" && (
+              <BulkTab clientId={current._id} clientName={current.name} />
             )}
           </>
         ) : (
