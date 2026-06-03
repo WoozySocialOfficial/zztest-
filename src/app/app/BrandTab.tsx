@@ -4,8 +4,8 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useRef, useState } from "react";
-import { useUpload } from "../../../lib/upload";
-import { extractPalette, fileToImage } from "../../../lib/palette";
+import { useUpload } from "../../lib/upload";
+import { extractPalette, fileToImage } from "../../lib/palette";
 
 type Scope = "design" | "caption" | "video";
 
@@ -35,7 +35,7 @@ export function BrandTab({ clientId }: { clientId: Id<"clients"> }) {
     try {
       const swatches: string[] = [];
       for (const file of Array.from(files)) {
-        const storageId = await upload(file);
+        const storageId = (await upload(file)) as Id<"_storage">;
         await addItem({ clientId, storageId, source: "uploaded" });
         try {
           const img = await fileToImage(file);

@@ -3,10 +3,18 @@
 _Last updated: 2026-06-03 · Branch: `feat/phase-1-foundation` · Repo: `WoozySocialOfficial/zztest-`_
 
 ## TL;DR
-Phase-1 foundation + working MVP scaffold is **built and committed**, but **not yet
-runnable end-to-end** because the Convex backend isn't provisioned. The access token
-provided is a *service account* that can't create a project. I need a **Convex deploy
-key** (or you run `npx convex dev` once) to provision, generate types, and verify.
+Phase-1 foundation + working MVP is **built, deployed, and verified to build/boot**.
+Convex backend is live on a **preview** deployment (`ardent-lapwing-470`), all env vars
++ Convex Auth keys are set, `next build` passes (full type-check), and the server serves
+`/login` and `/app`. Remaining: a **browser click-through** of the full loop, and a
+**production** Convex deployment for real use (preview is fine for testing).
+
+## Live deployment
+- Convex (preview): `https://ardent-lapwing-470.eu-west-1.convex.cloud`
+  (team `marcell-zaneta`, project `zz-test`). Dashboard via convex.dev.
+- Env vars set on it: MOCK_AI=true, IMAGE_PROVIDER=openai, OPENAI_API_KEY,
+  ANTHROPIC_API_KEY, DRAFT/FINAL image+caption models, SITE_URL, JWT_PRIVATE_KEY, JWKS.
+- Run locally: `npm run dev` (NEXT_PUBLIC_CONVEX_URL already in .env.local).
 
 ---
 
@@ -47,17 +55,19 @@ key** (or you run `npx convex dev` once) to provision, generate types, and verif
 - Phase 2: Higgsfield video (upload recorded clips → edited reels).
 - Phase 3: Cloud Campaign scheduling, Canva Connect, Vercel domain (Hostinger).
 
-## ⚠️ What I need from you to make it run
-1. **Convex deploy key** — dashboard.convex.dev → create project `ccs-post-studio` →
-   Settings → Deploy Keys → Generate (looks like `dev:name-123|eyJ...`). Paste it.
-   _Or_ run `npx convex dev` once locally and paste the `NEXT_PUBLIC_CONVEX_URL` +
-   `CONVEX_DEPLOYMENT` it writes. (The token you sent is a service account and can't
-   create a project.)
-2. **`ANTHROPIC_API_KEY`** — for captions (images already have the OpenAI key).
-3. After provisioning I will: `npx convex dev` (codegen + push), set Convex env
-   (`MOCK_AI=true`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, model vars), then run
-   `npx convex run @convex-dev/auth init` style setup for Auth keys, typecheck/build,
-   and verify the full loop on mock (zero cost) + one cheap real generation.
+## ✅ Done since first commit
+- Provisioned Convex (preview), set all env + Convex Auth keypair, wired
+  `NEXT_PUBLIC_CONVEX_URL`. `next build` passes; server serves `/login` + `/app`.
+- GitHub push working (write-scoped PAT). Both AI keys stored.
+
+## Remaining
+1. **Browser click-through** — sign up, create a client, add gallery/rules, generate
+   3 mock options ($0), approve one → confirm it lands in the gallery. I can drive this
+   with browser tooling if you want, or you can run `npm run dev` and try it.
+2. **Production deployment** — current backend is a *preview* (ephemeral). For real use,
+   create a prod deployment + prod deploy key, then re-run the env setup against prod.
+3. **Turn off `MOCK_AI`** (set to `false` on the deployment) when you want real images —
+   start with `draft: true` (cheap tier) to keep spend tiny.
 
 ## Manual steps you own (later)
 - **Vercel:** connect `zztest-` repo, set `NEXT_PUBLIC_CONVEX_URL` env var, deploy preview.
